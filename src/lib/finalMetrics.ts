@@ -17,4 +17,5 @@
 import {Metric} from '../types.js';
 
 
-export const finalMetrics: WeakSet<Metric> = new WeakSet();
+export const finalMetrics: WeakSet<Metric> | Set<Metric> =
+    typeof WeakSet === 'function' ? new WeakSet() : new Set();
