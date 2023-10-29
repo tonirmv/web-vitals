@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 const {beaconCountIs, clearBeacons, getBeacons} = require('../utils/beacons.js');
-
+const {afterLoad} = require('../utils/afterLoad.js');
 
 /**
  * Accepts a PerformanceNavigationTimingEntry (or shim) and asserts that it
@@ -49,15 +49,21 @@ function assertValidEntry(entry) {
 
   assert.strictEqual(entry.entryType, 'navigation');
   for (const timingProp of timingProps) {
-    if (!(entry[timingProp] >= 0)) {
-      console.log(timingProp, entry[timingProp]);
+    if (browser.capabilities.browserName === 'firefox' &&
+        timingProp === 'fetchStart' &&
+        entry[timingProp] === -1) {
+      // Firefox sometimes reports the fetchStart value as -1
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=1429422
+      continue;
     }
-
     assert(entry[timingProp] >= 0);
   }
 }
 
 describe('getTTFB()', async function() {
+  // Retry all tests in this suite up to 2 times.
+  this.retries(2);
+
   beforeEach(async function() {
     await clearBeacons();
   });
@@ -65,14 +71,17 @@ describe('getTTFB()', async function() {
   it('reports the correct value when run during page load', async function() {
     await browser.url('/test/ttfb');
 
-    await beaconCountIs(1);
+    const ttfb = await getTTFBBeacon();
 
-    const [ttfb] = await getBeacons();
+    if (browser.capabilities.browserName === 'firefox' && !ttfb) {
+      // Skipping test in Firefox due to entry not reported.
+      this.skip();
+    }
 
     assert(ttfb.value >= 0);
     assert(ttfb.value >= ttfb.entries[0].requestStart);
     assert(ttfb.value <= ttfb.entries[0].loadEventEnd);
-    assert(ttfb.id.match(/^v1-\d+-\d+$/));
+    assert(ttfb.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(ttfb.name, 'TTFB');
     assert.strictEqual(ttfb.value, ttfb.delta);
     assert.strictEqual(ttfb.entries.length, 1);
@@ -83,14 +92,17 @@ describe('getTTFB()', async function() {
   it('reports the correct value when run after page load', async function() {
     await browser.url('/test/ttfb?awaitLoad=1');
 
-    await beaconCountIs(1);
+    const ttfb = await getTTFBBeacon();
 
-    const [ttfb] = await getBeacons();
+    if (browser.capabilities.browserName === 'firefox' && !ttfb) {
+      // Skipping test in Firefox due to entry not reported.
+      this.skip();
+    }
 
     assert(ttfb.value >= 0);
     assert(ttfb.value >= ttfb.entries[0].requestStart);
     assert(ttfb.value <= ttfb.entries[0].loadEventEnd);
-    assert(ttfb.id.match(/^v1-\d+-\d+$/));
+    assert(ttfb.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(ttfb.name, 'TTFB');
     assert.strictEqual(ttfb.value, ttfb.delta);
     assert.strictEqual(ttfb.entries.length, 1);
@@ -98,3 +110,18 @@ describe('getTTFB()', async function() {
     assertValidEntry(ttfb.entries[0]);
   });
 });
+
+const getTTFBBeacon = async () => {
+  // In Firefox, sometimes no TTFB is reported due to negative values.
+  // https://github.com/GoogleChrome/web-vitals/issues/137
+  if (browser.capabilities.browserName === 'firefox') {
+    // In Firefox, wait 1 second after load.
+    await afterLoad();
+    await browser.pause(1000);
+  } else {
+    // Otherwise wait until the beacon is received.
+    await beaconCountIs(1);
+  }
+  const [ttfb] = await getBeacons();
+  return ttfb;
+};

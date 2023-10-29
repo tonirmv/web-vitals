@@ -14,8 +14,22 @@
  * limitations under the License.
  */
 
-import {Metric} from '../types.js';
 
+/**
+ * Returns a promise that resolves once the browser window has loaded and
+ * all load callbacks have finished executing.
+ * @return {Promise<void>}
+ */
+function afterLoad() {
+  return browser.executeAsync((done) => {
+    if (document.readyState === 'complete') {
+      setTimeout(done, 0);
+    } else {
+      addEventListener('pageshow', done);
+    }
+  });
+}
 
-export const finalMetrics: WeakSet<Metric> | Set<Metric> =
-    typeof WeakSet === 'function' ? new WeakSet() : new Set();
+module.exports = {
+  afterLoad,
+};

@@ -30,7 +30,7 @@ const trackChanges = () => {
   }, true);
 };
 
-export const getFirstHidden = () => {
+export const getVisibilityWatcher = () => {
   if (firstHiddenTime < 0) {
     // If the document is hidden when this code runs, assume it was hidden
     // since navigation start. This isn't a perfect heuristic, but it's the
@@ -58,7 +58,7 @@ export const getFirstHidden = () => {
     });
   }
   return {
-    get timeStamp() {
+    get firstHiddenTime() {
       return firstHiddenTime;
     }
   }

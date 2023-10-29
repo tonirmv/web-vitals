@@ -15,10 +15,13 @@
  */
 
 import {firstInputPolyfill, resetFirstInputPolyfill} from './lib/polyfills/firstInputPolyfill.js';
-import {firstHiddenTime} from './lib/polyfills/firstHiddenTimePolyfill.js';
+import {getFirstHiddenTime} from './lib/polyfills/getFirstHiddenTimePolyfill.js';
 
 resetFirstInputPolyfill();
-self['webVitals'] = self['webVitals'] || {};
-self['webVitals']['firstInputPolyfill'] = firstInputPolyfill;
-self['webVitals']['resetFirstInputPolyfill'] = resetFirstInputPolyfill;
-self['webVitals']['firstHiddenTime'] = firstHiddenTime;
+self.webVitals = {
+  firstInputPolyfill: firstInputPolyfill,
+  resetFirstInputPolyfill: resetFirstInputPolyfill,
+  get firstHiddenTime() {
+    return getFirstHiddenTime();
+  },
+};

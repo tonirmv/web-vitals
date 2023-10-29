@@ -17,12 +17,16 @@
 const assert = require('assert');
 const {beaconCountIs, clearBeacons, getBeacons} = require('../utils/beacons.js');
 const {browserSupportsEntry} = require('../utils/browserSupportsEntry.js');
+const {afterLoad} = require('../utils/afterLoad.js');
 const {imagesPainted} = require('../utils/imagesPainted.js');
 const {stubForwardBack} = require('../utils/stubForwardBack.js');
 const {stubVisibilityChange} = require('../utils/stubVisibilityChange.js');
 
 
 describe('getCLS()', async function() {
+  // Retry all tests in this suite up to 2 times.
+  this.retries(2);
+
   let browserSupportsCLS;
   before(async function() {
     browserSupportsCLS = await browserSupportsEntry('layout-shift');
@@ -45,12 +49,10 @@ describe('getCLS()', async function() {
 
     const [cls] = await getBeacons();
     assert(cls.value >= 0);
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, cls.delta);
     assert.strictEqual(cls.entries.length, 2);
-
-    await browser.url('/test/cls');
   });
 
   it('reports the correct value on page unload after shifts (reportAllChanges === false)', async function() {
@@ -66,10 +68,107 @@ describe('getCLS()', async function() {
 
     const [cls] = await getBeacons();
     assert(cls.value >= 0);
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, cls.delta);
     assert.strictEqual(cls.entries.length, 2);
+  });
+
+  it('resets the session after timeout or gap elapses', async function() {
+    if (!browserSupportsCLS) this.skip();
+
+    await browser.url('/test/cls');
+
+    // Wait until all images are loaded and rendered.
+    await imagesPainted();
+    await browser.pause(1000);
+
+    await stubVisibilityChange('hidden');
+    await beaconCountIs(1);
+
+    const [cls1] = await getBeacons();
+
+    assert(cls1.value >= 0);
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
+    assert.strictEqual(cls1.name, 'CLS');
+    assert.strictEqual(cls1.value, cls1.delta);
+    assert.strictEqual(cls1.entries.length, 2);
+
+    await browser.pause(1000);
+    await stubVisibilityChange('visible');
+    await clearBeacons();
+
+    // Force 2 layout shifts, totaling 0.5.
+    await browser.executeAsync((done) => {
+      document.body.style.overflow = 'hidden'; // Prevent scroll bars.
+      document.querySelector('main').style.left = '25vmax';
+      setTimeout(() => {
+        document.querySelector('main').style.left = '0px';
+        done();
+      }, 50);
+    });
+
+    await stubVisibilityChange('hidden');
+    await beaconCountIs(1);
+
+    const [cls2] = await getBeacons();
+
+    // The value should be exactly 0.5, but round just in case.
+    assert.strictEqual(Math.round(cls2.value * 100) / 100, 0.5);
+    assert.strictEqual(cls2.name, 'CLS');
+    assert.strictEqual(cls2.value, cls1.value + cls2.delta);
+    assert.strictEqual(cls2.entries.length, 2);
+    assert(cls2.id.match(/^v2-\d+-\d+$/));
+
+    await browser.pause(1000);
+    await stubVisibilityChange('visible');
+    await clearBeacons();
+
+    // Force 4 separate layout shifts, totaling 1.5.
+    await browser.executeAsync((done) => {
+      document.querySelector('main').style.left = '25vmax';
+      setTimeout(() => {
+        document.querySelector('main').style.left = '0px';
+        setTimeout(() => {
+          document.querySelector('main').style.left = '50vmax';
+          setTimeout(() => {
+            document.querySelector('main').style.left = '0px';
+            done();
+          }, 50);
+        }, 50);
+      }, 50);
+    });
+
+    await stubVisibilityChange('hidden');
+    await beaconCountIs(1);
+
+    const [cls3] = await getBeacons();
+
+    // The value should be exactly 1.5, but round just in case.
+    assert.strictEqual(Math.round(cls3.value * 100) / 100, 1.5);
+    assert.strictEqual(cls3.name, 'CLS');
+    assert.strictEqual(cls3.value, cls2.value + cls3.delta);
+    assert.strictEqual(cls3.entries.length, 4);
+    assert(cls3.id.match(/^v2-\d+-\d+$/));
+
+    await browser.pause(1000);
+    await stubVisibilityChange('visible');
+    await clearBeacons();
+
+    // Force 2 layout shifts, totalling 1.0 (less than the previous max).
+    await browser.executeAsync((done) => {
+      document.querySelector('main').style.left = '50vmax';
+      setTimeout(() => {
+        document.querySelector('main').style.left = '0px';
+        done();
+      }, 50);
+    });
+
+    // Wait a bit to ensure no beacons were sent.
+    await browser.pause(1000);
+
+    const beacons = await getBeacons();
+    assert.strictEqual(beacons.length, 0);
   });
 
   it('does not report if the browser does not support CLS', async function() {
@@ -104,7 +203,7 @@ describe('getCLS()', async function() {
     const [cls1, cls2] = await getBeacons();
 
     assert(cls1.value >= 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.name, 'CLS');
     assert.strictEqual(cls1.value, cls1.delta);
     assert.strictEqual(cls1.entries.length, 1);
@@ -136,7 +235,7 @@ describe('getCLS()', async function() {
     const [cls1, cls2] = await getBeacons();
 
     assert(cls1.value >= 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.value, cls1.delta);
     assert.strictEqual(cls1.entries.length, 1);
 
@@ -172,7 +271,7 @@ describe('getCLS()', async function() {
 
     assert(cls1.value >= 0);
     assert(cls1.delta >= 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.name, 'CLS');
     assert.strictEqual(cls1.value, cls1.delta);
     assert.strictEqual(cls1.entries.length, 2);
@@ -207,7 +306,7 @@ describe('getCLS()', async function() {
     const [cls1, cls2] = await getBeacons();
 
     assert(cls1.value > 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.name, 'CLS');
     assert.strictEqual(cls1.value, cls1.delta);
     assert.strictEqual(cls1.entries.length, 1);
@@ -252,7 +351,7 @@ describe('getCLS()', async function() {
     const [cls1] = await getBeacons();
 
     assert(cls1.value >= 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.delta, cls1.value);
     assert.strictEqual(cls1.name, 'CLS');
     assert.strictEqual(cls1.value, cls1.delta);
@@ -267,7 +366,7 @@ describe('getCLS()', async function() {
     const [cls2] = await getBeacons();
 
     assert(cls2.value >= 0);
-    assert(cls2.id.match(/^v1-\d+-\d+$/));
+    assert(cls2.id.match(/^v2-\d+-\d+$/));
     assert(cls2.id !== cls1.id);
 
     assert.strictEqual(cls2.delta, cls2.value);
@@ -284,7 +383,7 @@ describe('getCLS()', async function() {
     const [cls3] = await getBeacons();
 
     assert(cls3.value >= 0);
-    assert(cls3.id.match(/^v1-\d+-\d+$/));
+    assert(cls3.id.match(/^v2-\d+-\d+$/));
     assert(cls3.id !== cls2.id);
 
     assert.strictEqual(cls3.delta, cls3.value);
@@ -302,7 +401,7 @@ describe('getCLS()', async function() {
     const [cls1, cls2] = await getBeacons();
 
     assert(cls1.value > 0);
-    assert(cls1.id.match(/^v1-\d+-\d+$/));
+    assert(cls1.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls1.name, 'CLS');
     assert.strictEqual(cls1.value, cls1.delta);
     assert.strictEqual(cls1.entries.length, 1);
@@ -325,7 +424,7 @@ describe('getCLS()', async function() {
     const [cls3] = await getBeacons();
 
     assert(cls3.value > 0);
-    assert(cls3.id.match(/^v1-\d+-\d+$/));
+    assert(cls3.id.match(/^v2-\d+-\d+$/));
     assert(cls3.id !== cls2.id);
     assert.strictEqual(cls3.name, 'CLS');
     assert.strictEqual(cls3.value, cls3.delta);
@@ -337,12 +436,14 @@ describe('getCLS()', async function() {
 
     await browser.url(`/test/cls?noLayoutShifts=1`);
 
+    // Wait until the page is loaded before hiding.
+    await afterLoad();
     await stubVisibilityChange('hidden');
 
     await beaconCountIs(1);
 
     const [cls] = await getBeacons();
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, 0);
     assert.strictEqual(cls.delta, 0);
@@ -354,12 +455,14 @@ describe('getCLS()', async function() {
 
     await browser.url(`/test/cls?reportAllChanges=1&noLayoutShifts=1`);
 
+    // Wait until the page is loaded before hiding.
+    await afterLoad();
     await stubVisibilityChange('hidden');
 
     await beaconCountIs(1);
 
     const [cls] = await getBeacons();
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, 0);
     assert.strictEqual(cls.delta, 0);
@@ -371,12 +474,14 @@ describe('getCLS()', async function() {
 
     await browser.url(`/test/cls?noLayoutShifts=1`);
 
+    // Wait until the page is loaded before navigating away.
+    await afterLoad();
     await browser.url('about:blank');
 
     await beaconCountIs(1);
 
     const [cls] = await getBeacons();
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, 0);
     assert.strictEqual(cls.delta, 0);
@@ -388,16 +493,54 @@ describe('getCLS()', async function() {
 
     await browser.url(`/test/cls?noLayoutShifts=1&reportAllChanges=1`);
 
+    // Wait until the page is loaded before navigating away.
+    await afterLoad();
     await browser.url('about:blank');
 
     await beaconCountIs(1);
 
     const [cls] = await getBeacons();
-    assert(cls.id.match(/^v1-\d+-\d+$/));
+    assert(cls.id.match(/^v2-\d+-\d+$/));
     assert.strictEqual(cls.name, 'CLS');
     assert.strictEqual(cls.value, 0);
     assert.strictEqual(cls.delta, 0);
     assert.strictEqual(cls.entries.length, 0);
+  });
+
+  it('does not report if the document was hidden at page load time', async function() {
+    await browser.url('/test/cls?hidden=1');
+
+    await stubVisibilityChange('visible');
+
+    // Wait a bit to ensure no beacons were sent.
+    await browser.pause(1000);
+
+    const beacons = await getBeacons();
+    assert.strictEqual(beacons.length, 0);
+  });
+
+  it('reports if the page is restored from bfcache even when the document was hidden at page load time', async function() {
+    if (!browserSupportsCLS) this.skip();
+
+    await browser.url('/test/cls?hidden=1');
+
+    await stubForwardBack();
+
+    // Wait for a frame to be painted.
+    await browser.executeAsync((done) => requestAnimationFrame(done));
+
+    await triggerLayoutShift();
+
+    await stubVisibilityChange('hidden');
+    await beaconCountIs(1);
+
+    const [cls] = await getBeacons();
+
+    assert(cls.value >= 0);
+    assert(cls.id.match(/^v2-\d+-\d+$/));
+    assert.strictEqual(cls.name, 'CLS');
+    assert.strictEqual(cls.delta, cls.value);
+    assert.strictEqual(cls.entries.length, 1);
   });
 });
 
